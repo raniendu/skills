@@ -1,0 +1,22 @@
+# Local environments and generated Python files
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+
+# Local credentials and personal agent settings
+.env
+.env.*
+!.env.example
+.pi/
+.claude/
+.codex/
+
+# Local evaluation artifacts, not reusable synthetic fixtures
+artifacts/
+
+# OS/editor state
+.DS_Store
+.idea/
+.vscode/
