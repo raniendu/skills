@@ -23,8 +23,18 @@ synthetic inputs. Root CI must not automatically run newly contributed skill
 scripts or make model calls.
 
 `scripts/validate.py` uses `skills-ref` for format validation and enforces the
-local policy in [the standard](skill-standard.md). Zero discovered skills is a
-valid, explicitly reported skeleton state, not evidence of useful skill behavior.
+local policy in [the standard](skill-standard.md). For each bundled Python helper
+under `scripts/`, it requires one well-formed PEP 723 block, parses its TOML, and
+checks the required `requires-python` and `dependencies` field types. Offline
+regression tests cover third-party and standard-library-only declarations,
+missing/malformed/duplicate blocks, invalid fields, nested helpers, and encoding
+failures without executing scripts or resolving packages. Reviewers must still
+check specifier validity, complete dependency declarations, uv commands, and
+behavior from an unrelated working directory.
+
+Zero discovered skills is a valid, explicitly reported skeleton state, not
+evidence of useful skill behavior. The new Python-helper rule has no existing
+skills to migrate; fixture passes do not establish real helper portability.
 
 To inspect one future skill directly with the pinned reference implementation:
 

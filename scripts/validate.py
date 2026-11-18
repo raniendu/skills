@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import tomllib
 from pathlib import Path
 
 from skills_ref import SkillError, read_properties, validate
@@ -19,6 +20,9 @@ REQUIRED_SECTIONS = (
 )
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".ruff_cache"}
 NAME_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+SCRIPT_METADATA_PATTERN = re.compile(
+    r"(?m)^# /// script\r?\n((?:#(?: [^\r\n]*)?\r?\n)*?)# ///\r?$"
+)
 
 
 def section_contents(content: str) -> dict[str, list[str]]:
@@ -44,6 +48,33 @@ def section_contents(content: str) -> dict[str, list[str]]:
         elif current is not None:
             sections[current].append(line)
     return sections
+
+
+def check_python_script(path: Path) -> list[str]:
+    """Check inline metadata without executing code or resolving dependencies."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return [f"Cannot read Python script: {exc}"]
+    blocks = SCRIPT_METADATA_PATTERN.findall(content)
+    if len(blocks) != 1 or content.splitlines().count("# /// script") != 1:
+        return ["Python helpers require exactly one well-formed PEP 723 script block"]
+    try:
+        metadata = tomllib.loads("\n".join(line[2:] for line in blocks[0].splitlines()))
+    except tomllib.TOMLDecodeError as exc:
+        return [f"Invalid PEP 723 TOML: {exc}"]
+
+    errors: list[str] = []
+    requires_python = metadata.get("requires-python")
+    if not isinstance(requires_python, str) or not requires_python.strip():
+        errors.append("PEP 723 requires-python must be a non-empty string")
+    dependencies = metadata.get("dependencies")
+    if not isinstance(dependencies, list) or any(
+        not isinstance(dependency, str) or not dependency.strip()
+        for dependency in dependencies
+    ):
+        errors.append("PEP 723 dependencies must be an array of non-empty strings")
+    return errors
 
 
 def check_skill(directory: Path) -> list[str]:
@@ -92,6 +123,12 @@ def check_skill(directory: Path) -> list[str]:
     evidence = directory / "TESTING.md"
     if not evidence.is_file() or not evidence.read_text(encoding="utf-8").strip():
         errors.append("Missing or empty TESTING.md")
+    for script in sorted((directory / "scripts").rglob("*.py")):
+        if script.is_file():
+            errors.extend(
+                f"{script.relative_to(directory)}: {error}"
+                for error in check_python_script(script)
+            )
     return errors
 
 

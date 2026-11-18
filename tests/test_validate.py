@@ -46,6 +46,15 @@ class ValidatorTests(unittest.TestCase):
         )
         return directory
 
+    def add_script(self, content: str, name: str = "helper.py") -> Path:
+        directory = self.root / "skills" / "sample-task"
+        if not directory.exists():
+            self.add_skill()
+        path = directory / "scripts" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
     def errors(self) -> str:
         return "\n".join(check_repository(self.root)[0])
 
@@ -176,6 +185,95 @@ class ValidatorTests(unittest.TestCase):
         target.write_text("external", encoding="utf-8")
         (directory / "linked.txt").symlink_to(target)
         self.assertIn("symlinks are not allowed", self.errors())
+
+    def test_python_metadata_is_checked_without_execution(self) -> None:
+        self.add_script(
+            "# /// script\n"
+            '# requires-python = ">=3.11"\n'
+            '# dependencies = ["synthetic-package>=1"]\n'
+            "# ///\n"
+            'raise RuntimeError("Validation must not execute this script")\n'
+        )
+        self.assertEqual(check_repository(self.root), ([], 1))
+
+    def test_stdlib_python_helpers_accept_empty_dependencies(self) -> None:
+        self.add_script(
+            '# /// script\n# requires-python = ">=3.11"\n# dependencies = []\n# ///'
+        )
+        self.assertEqual(check_repository(self.root), ([], 1))
+
+    def test_python_metadata_allows_shebang_crlf_and_tool_settings(self) -> None:
+        self.add_script(
+            "#!/usr/bin/env -S uv run --script\r\n"
+            "# /// script\r\n"
+            '# requires-python = ">=3.11"\r\n'
+            "#\r\n"
+            "# dependencies = []\r\n"
+            "# [tool.uv]\r\n"
+            "# offline = true\r\n"
+            "# ///\r\n"
+        )
+        self.assertEqual(check_repository(self.root), ([], 1))
+
+    def test_python_helpers_require_one_well_formed_metadata_block(self) -> None:
+        block = (
+            '# /// script\n# requires-python = ">=3.11"\n# dependencies = []\n# ///\n'
+        )
+        for content in (
+            "pass\n",
+            block.removesuffix("# ///\n"),
+            block + block,
+            block + "# /// script\n",
+            block.replace("# dependencies", "dependencies"),
+        ):
+            with self.subTest(content=content):
+                self.add_script(content)
+                self.assertIn("well-formed PEP 723", self.errors())
+                self.assertIn("scripts/helper.py", self.errors())
+
+    def test_python_metadata_ignores_other_block_types(self) -> None:
+        block = (
+            '# /// script\n# requires-python = ">=3.11"\n# dependencies = []\n# ///\n'
+        )
+        other = "# /// custom\n# Not TOML: ignored metadata\n# ///\n"
+        for content in (other + block, block + other):
+            with self.subTest(content=content):
+                self.add_script(content)
+                self.assertEqual(check_repository(self.root), ([], 1))
+
+    def test_python_metadata_rejects_invalid_toml(self) -> None:
+        self.add_script("# /// script\n# dependencies = [\n# ///\n")
+        self.assertIn("Invalid PEP 723 TOML", self.errors())
+
+    def test_python_metadata_requires_explicit_field_types(self) -> None:
+        cases = (
+            ("# dependencies = []\n", "requires-python"),
+            ("# requires-python = 311\n# dependencies = []\n", "requires-python"),
+            ('# requires-python = " "\n# dependencies = []\n', "requires-python"),
+            ('# requires-python = ">=3.11"\n', "dependencies"),
+            ('# requires-python = ">=3.11"\n# dependencies = "rich"\n', "dependencies"),
+            ('# requires-python = ">=3.11"\n# dependencies = [42]\n', "dependencies"),
+            ('# requires-python = ">=3.11"\n# dependencies = [" "]\n', "dependencies"),
+        )
+        for fields, expected in cases:
+            with self.subTest(fields=fields):
+                self.add_script(f"# /// script\n{fields}# ///\n")
+                self.assertIn(expected, self.errors())
+
+    def test_nested_python_helpers_are_checked(self) -> None:
+        self.add_script("pass\n", "nested/helper.py")
+        self.assertIn("scripts/nested/helper.py", self.errors())
+
+    def test_python_helpers_reject_invalid_encoding(self) -> None:
+        self.add_script("").write_bytes(b"\xff")
+        self.assertIn("Cannot read Python script", self.errors())
+
+    def test_python_metadata_rule_does_not_apply_to_other_scripts(self) -> None:
+        self.add_script("exit 0\n", "helper.sh")
+        maintenance = self.root / "scripts"
+        maintenance.mkdir()
+        (maintenance / "validate.py").write_text("pass\n", encoding="utf-8")
+        self.assertEqual(check_repository(self.root), ([], 1))
 
     def test_template_matches_policy_without_publishing_a_skill(self) -> None:
         template = (REPOSITORY / "docs" / "skill-template.md").read_text(

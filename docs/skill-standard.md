@@ -110,6 +110,42 @@ root privileges, an installed MCP server, network access, a provider account, or
 unlimited paid inference. Do not install dependencies without authorization.
 Treat scripts as executable code requiring independent review and focused tests.
 
+### Portable Python helpers
+
+Every `.py` file under a skill's `scripts/` directory MUST contain exactly one
+well-formed [PEP 723 inline script metadata][pep723] block. It MUST declare a
+valid `requires-python` version specifier and a `dependencies` array listing all
+third-party runtime dependencies as valid Python dependency specifiers. Use
+`dependencies = []` for standard-library-only helpers. Do not rely on globally
+installed packages, an activated virtual environment, manual `pip install`, or
+the repository's root maintenance environment.
+
+For example, a standard-library-only helper can begin with:
+
+```python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+```
+
+`SKILL.md` MUST declare uv as a prerequisite and document execution with
+`uv run <skill-directory>/scripts/helper.py`, replacing `<skill-directory>` with
+the resolved skill root supplied by the consuming agent. Do not assume its
+working directory. Explain any Python/package downloads, network access, and
+cache requirements, plus failure behavior when uv or dependencies are
+unavailable. Required approval MUST precede installing uv, downloading Python,
+or resolving/installing packages; `uv run` may do the latter automatically.
+See [uv's script guide][uv-scripts] for execution and metadata details.
+
+This rule is stricter than the metadata specification: both fields are required
+here, even for helpers without third-party dependencies. It applies to bundled
+skill helpers, not the repository's own maintenance project. There are no
+existing skills to migrate when introducing this rule.
+
+[pep723]: https://packaging.python.org/en/latest/specifications/inline-script-metadata/
+[uv-scripts]: https://docs.astral.sh/uv/guides/scripts/
+
 ## Licensing and maintenance
 
 Follow [the porting guide](porting.md) for borrowed content and upstream tracking.
@@ -125,8 +161,11 @@ installation, a release, or a live run.
 ## Enforcement boundary
 
 The repository validator checks layout, the reference format validator, local
-metadata policy, required headings, the line budget, and non-empty test evidence
-files. CI also runs tooling tests, Python lint/format checks, and Markdown lint.
+metadata policy, required headings, the line budget, non-empty test evidence
+files, and bundled Python helpers' inline metadata syntax and field types. It
+cannot prove that dependency/version specifiers resolve, all imports are
+covered, or documented commands use uv; those require review and focused tests.
+CI also runs tooling tests, Python lint/format checks, and Markdown lint.
 These checks cannot establish correctness, licensing permission, absence of
 secrets, successful agent routing, or safety. Those remain mandatory review and
 behavioral-evaluation gates in [the testing guide](testing.md).
